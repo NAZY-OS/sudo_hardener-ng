@@ -2,8 +2,10 @@
 
 # Script: sudo-hardening-pro_tweaks
 # Author: [NAZY-OS]
-# Version: 1.04
 # Description: [Applies or reverts PAM and sudoers configuration changes for security hardening.]
+# Version: 1.04
+# License: MIT License
+
 
 # Flag file to indicate if changes have been applied
 FLAG_FILE="/tmp/sudo-hardening-applied.flag"
