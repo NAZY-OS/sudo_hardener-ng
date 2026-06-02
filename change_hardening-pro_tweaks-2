@@ -54,6 +54,24 @@ check_and_create_files() {
     done
 }
 
+# Function to apply PAM changes for 'su'
+apply_pam_su_changes() {
+    local file="/etc/pam.d/su"
+    add_line_if_missing "$file" "auth required pam_faillock.so preauth silent deny=8 unlock_time=1500 debug"
+    add_line_if_missing "$file" "auth required pam_faillock.so authfail deny=8 unlock_time=1500 debug"
+    add_line_if_missing "$file" "account required pam_faillock.so debug"
+    add_line_if_missing "$file" "auth required pam_wheel.so trust use_uid debug"
+}
+
+# Function to apply PAM changes for 'sudo'
+apply_pam_sudo_changes() {
+    local file="/etc/pam.d/sudo"
+    add_line_if_missing "$file" "auth required pam_faillock.so preauth silent deny=8 unlock_time=1500 debug"
+    add_line_if_missing "$file" "auth required pam_faillock.so authfail deny=8 unlock_time=1500 debug"
+    add_line_if_missing "$file" "account required pam_faillock.so debug"
+    add_line_if_missing "$file" "auth required pam_wheel.so trust use_uid debug"
+}
+
 # Function to apply changes
 apply_changes() {
     # Check if already root
@@ -74,13 +92,9 @@ apply_changes() {
     # Backup existing files
     create_backups
 
-    # Modify PAM for su and sudo with debug enabled
-    for file in /etc/pam.d/su /etc/pam.d/sudo; do
-        add_line_if_missing "$file" "auth required pam_faillock.so preauth silent deny=8 unlock_time=1500 debug"
-        add_line_if_missing "$file" "auth required pam_faillock.so authfail deny=8 unlock_time=1500 debug"
-        add_line_if_missing "$file" "account required pam_faillock.so debug"
-        add_line_if_missing "$file" "auth required pam_wheel.so trust use_uid debug"
-    done
+    # Apply PAM changes for su and sudo
+    apply_pam_su_changes
+    apply_pam_sudo_changes
 
     # Ensure the sudoers file for the wheel group exists with debug
     add_line_if_missing "/etc/sudoers.d/g_wheel" "%wheel ALL=(ALL) ALL"
