@@ -7,9 +7,17 @@
 # License: MIT License
 
 
+
+# =============================================
+# Security Hardening Script for PAM and Sudo
+# =============================================
+
 # Check root privileges
 [ "$(id -u)" -ne 0 ] && { echo "Error: Must be run as root" >&2; exit 1; }
 
+# =============================================
+# Display help message
+# =============================================
 show_help() {
     echo "Usage: $0 {apply|revert|--help}"
     echo
@@ -19,7 +27,9 @@ show_help() {
     echo "  --help  Display this help message."
 }
 
-# Create backups (silent if files don't exist)
+# =============================================
+# Create backup copies of configuration files
+# =============================================
 create_backups() {
     cp /etc/pam.d/su /etc/pam.d/su.bak 2>/dev/null
     cp /etc/pam.d/sudo /etc/pam.d/sudo.bak 2>/dev/null
@@ -27,32 +37,48 @@ create_backups() {
     [ -d /etc/sudoers.d ] && cp /etc/sudoers.d/g_wheel /etc/sudoers.d/g_wheel.bak 2>/dev/null
 }
 
-# Configure PAM for sudo and su
+# =============================================
+# Configure PAM settings for sudo and su
+# =============================================
 configure_pam() {
-    # sudo PAM config
+    # sudo PAM configuration with faillock protection
     cat >/etc/pam.d/sudo <<'EOF'
 # PAM configuration for sudo
-@include common-auth
-@include common-account
-@include common-session
+# Enforces account lockout after multiple failed attempts
 
-# Restrict sudo to wheel group
-auth required pam_wheel.so use_uid
+auth       required     pam_faillock.so preauth silent deny=8 unlock_time=1500
+auth       [success=1 default=ignore] pam_unix.so
+auth       required     pam_faillock.so authfail deny=8 unlock_time=1500
+auth       required     pam_wheel.so use_uid
+
+account    required     pam_faillock.so
+account    required     pam_unix.so
+
+session    required     pam_limits.so
+session    required     pam_unix.so
 EOF
 
-    # su PAM config (compatible with sudo)
+    # su PAM configuration (compatible with sudo)
     cat >/etc/pam.d/su <<'EOF'
-# PAM configuration for su /etc/sudoers.d/g_wheel
-@include common-auth
-@include common-account
-@include common-session
+# PAM configuration for su
+# Enforces account lockout after multiple failed attempts
 
-# Restrict su to wheel group
-auth required pam_wheel.so use_uid
+auth       required     pam_faillock.so preauth silent deny=8 unlock_time=1500
+auth       [success=1 default=ignore] pam_unix.so
+auth       required     pam_faillock.so authfail deny=8 unlock_time=1500
+auth       required     pam_wheel.so use_uid
+
+account    required     pam_faillock.so
+account    required     pam_unix.so
+
+session    required     pam_limits.so
+session    required     pam_unix.so
 EOF
 }
 
-# Configure sudoers
+# =============================================
+# Configure sudoers file and directory
+# =============================================
 configure_sudoers() {
     # Ensure sudoers.d directory exists
     [ -d /etc/sudoers.d ] || mkdir -p /etc/sudoers.d
@@ -68,7 +94,9 @@ configure_sudoers() {
     printf '\nDefaults env_reset,pwfeedback,timestamp_timeout=10,passwd_timeout=0,insults' >>/etc/sudoers
 }
 
-# Revert changes using backups
+# =============================================
+# Revert all changes using backup files
+# =============================================
 revert_changes() {
     [ -f /etc/pam.d/su.bak ] && cp /etc/pam.d/su.bak /etc/pam.d/su
     [ -f /etc/pam.d/sudo.bak ] && cp /etc/pam.d/sudo.bak /etc/pam.d/sudo
@@ -76,7 +104,9 @@ revert_changes() {
     [ -f /etc/sudoers.d/g_wheel.bak ] && cp /etc/sudoers.d/g_wheel.bak /etc/sudoers.d/g_wheel
 }
 
-# Main execution
+# =============================================
+# Main execution flow
+# =============================================
 case "$1" in
     apply)
         create_backups
