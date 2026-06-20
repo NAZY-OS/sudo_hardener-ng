@@ -1,13 +1,15 @@
-#!/bin/bash
+#!/bin/sh
 
 # Script: sudo-hardening-pro_tweaks
 # Author: [NAZY-OS]
 # Description: [Applies or reverts PAM and sudoers configuration changes for security hardening.]
+# Version: 2.1 RC
+# License: MIT License
 
-# Flag file to indicate if changes have been applied
-FLAG_FILE="/tmp/sudo-hardening-applied.flag"
 
-# Function to display help
+# Check root privileges
+[ "$(id -u)" -ne 0 ] && { echo "Error: Must be run as root" >&2; exit 1; }
+
 show_help() {
     echo "Usage: $0 {apply|revert|--help}"
     echo
@@ -17,146 +19,80 @@ show_help() {
     echo "  --help  Display this help message."
 }
 
-# Function to create backups
+# Create backups (silent if files don't exist)
 create_backups() {
-    cp /etc/pam.d/su /etc/pam.d/su.bak
-    cp /etc/pam.d/sudo /etc/pam.d/sudo.bak
-    cp /etc/sudoers /etc/sudoers.bak
-    cp /etc/sudoers.d/g_wheel /etc/sudoers.d/g_wheel.bak 2> /dev/null
+    cp /etc/pam.d/su /etc/pam.d/su.bak 2>/dev/null
+    cp /etc/pam.d/sudo /etc/pam.d/sudo.bak 2>/dev/null
+    cp /etc/sudoers /etc/sudoers.bak 2>/dev/null
+    [ -d /etc/sudoers.d ] && cp /etc/sudoers.d/g_wheel /etc/sudoers.d/g_wheel.bak 2>/dev/null
 }
 
-# Function to check and add a line to a file if it doesn't exist
-add_line_if_missing() {
-    local file="$1"
-    local line="$2"
-    if ! grep -q "$line" "$file"; then
-        echo "Adding line to $file: $line"
-        echo "$line" >> "$file"
-    else
-        echo "Line already present in $file: $line"
-    fi
+# Configure PAM for sudo and su
+configure_pam() {
+    # sudo PAM config
+    cat >/etc/pam.d/sudo <<'EOF'
+# PAM configuration for sudo
+@include common-auth
+@include common-account
+@include common-session
+
+# Restrict sudo to wheel group
+auth required pam_wheel.so use_uid
+EOF
+
+    # su PAM config (compatible with sudo)
+    cat >/etc/pam.d/su <<'EOF'
+# PAM configuration for su /etc/sudoers.d/g_wheel
+@include common-auth
+@include common-account
+@include common-session
+
+# Restrict su to wheel group
+auth required pam_wheel.so use_uid
+EOF
 }
 
-# Function to check and create necessary files if they are missing
-check_and_create_files() {
-    local files=(
-        "/etc/pam.d/su"
-        "/etc/pam.d/sudo"
-        "/etc/sudoers"
-        "/etc/sudoers.d/g_wheel"
-    )
-    
-    for file in "${files[@]}"; do
-        if [ ! -f "$file" ]; then
-            echo "File $file is missing. Creating it."
-            touch "$file"
-        fi
-    done
+# Configure sudoers
+configure_sudoers() {
+    # Ensure sudoers.d directory exists
+    [ -d /etc/sudoers.d ] || mkdir -p /etc/sudoers.d
+
+    # Create g_wheel file if it doesn't exist
+    [ -f /etc/sudoers.d/g_wheel ] || touch /etc/sudoers.d/g_wheel
+
+    # Add wheel group sudo privileges
+    echo '%wheel ALL=(ALL) ALL' >/etc/sudoers.d/g_wheel
+
+    # Add sudo defaults if not present
+    grep -q pwfeedback /etc/sudoers 2>/dev/null || \
+    printf '\nDefaults env_reset,pwfeedback,timestamp_timeout=10,passwd_timeout=0,insults' >>/etc/sudoers
 }
 
-# Function to apply PAM changes for 'su'
-apply_pam_su_changes() {
-    local file="/etc/pam.d/su"
-    add_line_if_missing "$file" "auth required pam_faillock.so preauth silent deny=8 unlock_time=1500 debug"
-    add_line_if_missing "$file" "auth required pam_faillock.so authfail deny=8 unlock_time=1500 debug"
-    add_line_if_missing "$file" "account required pam_faillock.so debug"
-    add_line_if_missing "$file" "auth required pam_wheel.so trust use_uid debug"
-}
-
-# Function to apply PAM changes for 'sudo'
-apply_pam_sudo_changes() {
-    local file="/etc/pam.d/sudo"
-    add_line_if_missing "$file" "auth required pam_faillock.so preauth silent deny=8 unlock_time=1500 debug"
-    add_line_if_missing "$file" "auth required pam_faillock.so authfail deny=8 unlock_time=1500 debug"
-    add_line_if_missing "$file" "account required pam_faillock.so debug"
-    add_line_if_missing "$file" "auth required pam_wheel.so trust use_uid debug"
-}
-
-# Function to apply changes
-apply_changes() {
-    # Check if already root
-    if [ "$(id -u)" -ne 0 ]; then
-        echo "This script must be run as root."
-        exit 1
-    fi
-
-    # Check if changes have already been applied
-    if [ -f "$FLAG_FILE" ]; then
-        echo "Changes have already been applied. Please revert before applying again."
-        exit 1
-    fi
-
-    # Check and create necessary files
-    check_and_create_files
-
-    # Backup existing files
-    create_backups
-
-    # Apply PAM changes for su and sudo
-    apply_pam_su_changes
-    apply_pam_sudo_changes
-
-    # Ensure the sudoers file for the wheel group exists with debug
-    add_line_if_missing "/etc/sudoers.d/g_wheel" "%wheel ALL=(ALL) ALL"
-
-    # Add pwfeedback to the sudoers file with debug
-    add_line_if_missing "/etc/sudoers" "Defaults env_reset,pwfeedback,timestamp_timeout=10,passwd_timeout=0,insults"
-
-    # Create or clear sudo log file
-    echo "Creating sudo log file if it does not exist."
-    touch /var/log/sudo.log
-    chmod 600 /var/log/sudo.log
-    add_line_if_missing "/etc/sudoers" "Defaults log_output,log_input"
-
-    # Check for syntax validity in the sudoers file
-    visudo -c
-
-    # Create a flag file to indicate changes have been applied
-    touch "$FLAG_FILE"
-
-    echo "Changes have been applied. Backup files have been created."
-    echo "Debug logging is enabled for PAM and Sudo."
-}
-
-# Function to revert changes
+# Revert changes using backups
 revert_changes() {
-    # Check if already root
-    if [ "$(id -u)" -ne 0 ]; then
-        echo "This script must be run as root."
-        exit 1
-    fi
-
-    # Check if changes have been applied
-    if [ ! -f "$FLAG_FILE" ]; then
-        echo "No changes have been applied. Nothing to revert."
-        exit 1
-    fi
-
-    # Restore backups
-    cp /etc/pam.d/su.bak /etc/pam.d/su
-    cp /etc/pam.d/sudo.bak /etc/pam.d/sudo
-    cp /etc/sudoers.bak /etc/sudoers
-    cp /etc/sudoers.d/g_wheel.bak /etc/sudoers.d/g_wheel 2> /dev/null
-
-    # Remove the flag file
-    rm -f "$FLAG_FILE"
-
-    echo "Changes have been reverted."
+    [ -f /etc/pam.d/su.bak ] && cp /etc/pam.d/su.bak /etc/pam.d/su
+    [ -f /etc/pam.d/sudo.bak ] && cp /etc/pam.d/sudo.bak /etc/pam.d/sudo
+    [ -f /etc/sudoers.bak ] && cp /etc/sudoers.bak /etc/sudoers
+    [ -f /etc/sudoers.d/g_wheel.bak ] && cp /etc/sudoers.d/g_wheel.bak /etc/sudoers.d/g_wheel
 }
 
-# Main script logic
+# Main execution
 case "$1" in
     apply)
-        apply_changes
+        create_backups
+        configure_pam
+        configure_sudoers
+        echo "Security hardening applied successfully."
         ;;
     revert)
         revert_changes
+        echo "Security hardening reverted successfully."
         ;;
-    --help)
+    --help|-h|help)
         show_help
         ;;
     *)
-        echo "Invalid option: $1"
+        echo "Error: Unknown command '$1'" >&2
         show_help
         exit 1
         ;;
