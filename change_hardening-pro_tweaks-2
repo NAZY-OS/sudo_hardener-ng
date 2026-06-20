@@ -34,6 +34,9 @@ create_backups() {
     cp /etc/pam.d/su /etc/pam.d/su.bak 2>/dev/null
     cp /etc/pam.d/sudo /etc/pam.d/sudo.bak 2>/dev/null
     cp /etc/sudoers /etc/sudoers.bak 2>/dev/null
+    cp /sbin/su /sbin/bsu 2>/dev/null
+    cp /sbin/sudo /sbin/bsudo
+    cp /sbin/sudo /sbin/doso
     [ -d /etc/sudoers.d ] && cp /etc/sudoers.d/g_wheel /etc/sudoers.d/g_wheel.bak 2>/dev/null
 }
 
